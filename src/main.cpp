@@ -6,6 +6,7 @@
 #include <Preferences.h>
 #include <esp_system.h>
 #include <time.h>
+#include "meteo.h"
 
 TFT_eSPI lcd;
 TFT_eSprite ui(&lcd);
@@ -16,7 +17,7 @@ const char* names[]={"HOME","RADIO","APRS","SIEC","HA","METEO","MQTT","SETUP"};
 const uint16_t accents[]={TFT_CYAN,TFT_ORANGE,TFT_GREEN,TFT_SKYBLUE,TFT_CYAN,TFT_YELLOW,TFT_MAGENTA,TFT_LIGHTGREY};
 const uint16_t bg=0x0884, tile=0x1927;
 String ssid[2],pass[2],apKey;
-uint8_t selection=0,brightness=180,slot=0;
+uint8_t selection=0,brightness=180,slot=0,weatherPage=0;
 bool inApp=false,apActive=false,asleep=false,dirty=true,connected=false;
 bool restartPending=false, displayReady=false;
 uint32_t apStarted=0;
@@ -41,10 +42,11 @@ void iconFor(int i,int x,int y,uint16_t c){
     case 7: ui.drawCircle(x,y,10,c);ui.drawCircle(x,y,4,c);ui.drawFastHLine(x-13,y,4,c);ui.drawFastHLine(x+10,y,4,c);break;
   }
 }
+String val(float x,int decimals=0){return isfinite(x)?String(x,decimals):String("--");}
 void render(){
   if(asleep)return;
   ui.fillSprite(bg);
-  ui.setTextColor(TFT_CYAN,bg);ui.drawString("POCKET TERMINAL  v0.1.0",6,2,2);
+  ui.setTextColor(TFT_CYAN,bg);ui.drawString("POCKET TERMINAL  v0.2.0",6,2,2);
   ui.setTextColor(connected?TFT_GREEN:TFT_LIGHTGREY,bg);
   ui.drawRightString(connected?"WiFi "+String(WiFi.RSSI())+"dBm":apActive?"SETUP AP":"OFFLINE",314,2,2);
   if(!inApp){
@@ -69,12 +71,37 @@ void render(){
         strftime(buf,sizeof(buf),"%d.%m.%Y",&t);line(buf,83);
       }else line("NTP: waiting for time",52);
       line(connected?"IP: "+WiFi.localIP().toString():"WiFi: offline",104);
-      line("PSRAM: "+String(ESP.getPsramSize()/1048576)+" MiB",124);
+      WeatherData w=weatherSnapshot();
+      line(w.valid?"Meteo: "+val(w.temp,1)+" C"+((w.failed||!connected||millis()-w.updated>1800000UL)?" (old)":""):"Meteo: waiting",124);
     }else if(selection==3){
       line(connected?"WiFi: connected":"WiFi: offline",50);
       line(connected?"IP: "+WiFi.localIP().toString():"IP: unavailable",72);
       line(connected?"RSSI: "+String(WiFi.RSSI())+" dBm":"RSSI: unavailable",94);
       line("Uptime: "+String(millis()/1000)+" s",116);
+    }else if(selection==5){
+      WeatherData w=weatherSnapshot();
+      line("Location: "+String(weatherLat)+", "+weatherLon,42,TFT_LIGHTGREY);
+      if(!w.valid){line(w.failed?"Weather unavailable":"Waiting for weather / NTP",76);line("B: retry",110);}
+      else {
+        if(weatherPage==0){
+          line("Temperature: "+val(w.temp,1)+" C",62,TFT_CYAN);
+          line("Humidity: "+val(w.humidity)+" %",82);
+          line("Pressure (surface): "+val(w.pressure)+" hPa",102);
+          line("Clouds: "+val(w.clouds)+" %",122);
+        }else if(weatherPage==1){
+          line("Wind: "+val(w.wind,1)+" km/h",62);
+          line("Direction: "+val(w.direction)+" deg",82);
+          if(isfinite(w.rain)&&w.rain>0)line("Rain: "+val(w.rain,1)+" mm",102);
+          line("Min / max: "+val(w.low,1)+" / "+val(w.high,1)+" C",122);
+        }else{
+          line("Sunrise: "+String(w.sunrise),62,TFT_YELLOW);
+          line("Sunset: "+String(w.sunset),82,TFT_ORANGE);
+          line("Age: "+String((millis()-w.updated)/60000)+" min",102);
+        }
+        bool old=w.failed||!connected||millis()-w.updated>1800000UL;
+        ui.setTextColor(old?TFT_ORANGE:TFT_GREEN,bg);
+        ui.drawRightString(old?"OLD":"LIVE",310,25,2);
+      }
     }else if(selection==7){
       line("Brightness: "+String(brightness),46);
       line("B: cycle brightness",66);
@@ -86,6 +113,7 @@ void render(){
       line("No live data",105,TFT_ORANGE);
     }
     line("Hold B: MENU",151,TFT_LIGHTGREY);
+    if(selection==5)ui.drawRightString("A: PAGE  B: RETRY",310,151,2);
   }
   ui.pushSprite(0,0);
 }
@@ -96,6 +124,7 @@ void configPage(){
     html+="<label>WiFi "+String(i+1)+" SSID<input maxlength=32 name=s"+String(i)+" value='"+esc(ssid[i])+"'></label>";
     html+="<label>Password<input type=password maxlength=63 name=p"+String(i)+"></label>";
   }
+  html+="<label>Latitude<input name=lat value='"+String(weatherLat)+"'></label><label>Longitude<input name=lon value='"+String(weatherLon)+"'></label>";
   html+="<label>Brightness (30-255)<input type=number min=30 max=255 name=bl value='"+String(brightness)+"'></label><label>Screen timeout seconds (0=never)<input type=number min=0 max=3600 name=sl value='"+String(sleepSeconds)+"'></label><button>Save and restart</button></form>";
   server.sendHeader("Cache-Control","no-store");server.send(200,"text/html",html);
 }
@@ -108,6 +137,9 @@ void startAP(){
   server.on("/",HTTP_GET,[]{if(!apActive||server.client().localIP()!=WiFi.softAPIP()){server.send(403);return;}configPage();});
   server.on("/save",HTTP_POST,[]{
     if(!apActive||server.client().localIP()!=WiFi.softAPIP()){server.send(403);return;}
+    String lat=server.arg("lat"),lon=server.arg("lon");
+    char *end1,*end2; double la=strtod(lat.c_str(),&end1),lo=strtod(lon.c_str(),&end2);
+    if(!lat.length()||!lon.length()||*end1||*end2||!isfinite(la)||!isfinite(lo)||fabs(la)>90||fabs(lo)>180){server.send(400,"text/plain","Invalid coordinates");return;}
     for(int i=0;i<2;i++){
       String ns=server.arg("s"+String(i)),np=server.arg("p"+String(i));
       if(ns.length()>32||np.length()>63||(np.length()>0&&np.length()<8)){server.send(400,"text/plain","Invalid WiFi credentials");return;}
@@ -118,6 +150,7 @@ void startAP(){
       ssid[i]=ns;if(!ns.length())pass[i]="";
       prefs.putString(("s"+String(i)).c_str(),ssid[i]);prefs.putString(("p"+String(i)).c_str(),pass[i]);
     }
+    prefs.putString("lat",String(la,6));prefs.putString("lon",String(lo,6));
     brightness=constrain(server.arg("bl").toInt(),30,255);
     sleepSeconds=constrain(server.arg("sl").toInt(),0,3600);
     prefs.putUChar("bl",brightness);prefs.putUInt("sl",sleepSeconds);
@@ -148,6 +181,8 @@ void setup(){
   Serial.begin(115200);pinMode(A,INPUT_PULLUP);pinMode(B,INPUT_PULLUP);
   pinMode(PWR,OUTPUT);digitalWrite(PWR,HIGH);
   prefs.begin("pocket",false);
+  prefs.getString("lat","51.590748").toCharArray(weatherLat,sizeof(weatherLat));
+  prefs.getString("lon","18.736974").toCharArray(weatherLon,sizeof(weatherLon));
   brightness=prefs.getUChar("bl",180);sleepSeconds=prefs.getUInt("sl",60);
   for(int i=0;i<2;i++){ssid[i]=prefs.getString(("s"+String(i)).c_str(),"");pass[i]=prefs.getString(("p"+String(i)).c_str(),"");}
   lcd.init();lcd.setRotation(1);ledcSetup(0,5000,8);ledcAttachPin(BL,0);ledcWrite(0,brightness);
@@ -156,8 +191,9 @@ void setup(){
   ui.fillSprite(bg);ui.setTextColor(TFT_CYAN,bg);ui.drawCentreString("POCKET TERMINAL",160,50,2);ui.drawCentreString("LILYGO T-Display-S3",160,95,2);ui.pushSprite(0,0);delay(800);
   WiFi.persistent(false);WiFi.mode(WIFI_STA);WiFi.setAutoReconnect(false);
   if(!ssid[0].length()&&!ssid[1].length()){selection=7;inApp=true;startAP();}
+  xTaskCreate(weatherWorker,"meteo",16384,nullptr,1,nullptr);
   lastInput=millis();dirty=true;
-  Serial.println("POCKET_TERMINAL_V0.1.0");
+  Serial.println("POCKET_TERMINAL_V0.2.0");
 }
 void loop(){
   if(!displayReady){delay(100);return;}
@@ -170,6 +206,7 @@ void loop(){
     if(asleep){asleep=false;ledcWrite(0,brightness);}
     else if(!inApp){if(ea)selection=(selection+(ea==2?7:1))%8;if(eb==1)inApp=true;}
     else if(eb==2){inApp=false;}
+    else if(selection==5){if(ea)weatherPage=(weatherPage+1)%3;if(eb==1)weatherRefresh=true;}
     else if(selection==7){if(ea==2)startAP();if(eb==1){brightness=brightness==180?80:brightness==80?255:180;ledcWrite(0,brightness);prefs.putUChar("bl",brightness);}}
     dirty=true;
   }
