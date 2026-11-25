@@ -1,1 +1,25 @@
-<!doctype html><html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pocket Terminal – LILYGO T-Display-S3</title><style>body{background:#091522;color:#e5f4ff;font:16px system-ui;max-width:800px;margin:60px auto;padding:24px}h1{color:#67d9ff}section{padding:24px;border:1px solid #36536a;border-radius:12px}a{color:#67d9ff}</style><h1>Pocket Terminal – LILYGO T-Display-S3</h1><section><h2>Web Installer / Instalator WWW</h2><p>Diagnostic v0.0.1 — experimental / wersja testowa. Standard non-touch T-Display-S3 only.</p><p>Install only after verifying your full factory flash backup. Close serial monitors before connecting.</p><script type="module" src="https://unpkg.com/esp-web-tools@10.1.1/dist/web/install-button.js?module"></script><esp-web-install-button manifest="manifest.json"><button slot="activate">INSTALL DIAGNOSTIC FIRMWARE</button><span slot="unsupported">Use Chrome or Edge on desktop.</span></esp-web-install-button><p><a href="pocket-terminal-diagnostic-v0.0.1.bin">BIN</a> · <a href="SHA256SUMS.txt">SHA-256</a></p><p>HOME · RADIO · APRS · NETWORK · HA · METEO · MQTT</p><p>External sensors deferred / Czujniki zewnętrzne odłożone.</p><p>Before flashing, back up factory flash. / Przed programowaniem wykonaj kopię Flash.</p><a href="https://github.com/sp7uto/pocket-terminal-LILYGO-T-Display-S3">GitHub</a></section></html>
+<!doctype html>
+<html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pocket Terminal – LILYGO T-Display-S3</title>
+<style>body{background:#091522;color:#e5f4ff;font:16px system-ui;max-width:800px;margin:60px auto;padding:24px}h1{color:#67d9ff}section{padding:24px;border:1px solid #36536a;border-radius:12px}a{color:#67d9ff}button{background:#1678b5;color:white;border:0;border-radius:8px;padding:14px;font-weight:bold;cursor:pointer}</style>
+<h1>Pocket Terminal – LILYGO T-Display-S3</h1><section><h2>Web Installer / Instalator WWW</h2><p>v0.1.0 — experimental / wersja testowa. Standard non-touch T-Display-S3 only.</p><p>Keep your verified factory backup. Close serial monitors. / Zachowaj sprawdzoną kopię Flash, zamknij monitor portu.</p>
+<p id="status">Checking firmware availability / Sprawdzanie dostępności firmware…</p>
+<div id="install" hidden><esp-web-install-button manifest="manifest.json"><button slot="activate">INSTALL POCKET TERMINAL v0.1.0</button><span slot="unsupported">Use Chrome or Edge on desktop.</span></esp-web-install-button></div>
+<p><a href="pocket-terminal-v0.1.0.bin">BIN</a> · <a href="SHA256SUMS.txt">SHA-256</a></p>
+<p>HOME · RADIO · APRS · NETWORK · HA · METEO · MQTT · SETUP</p><p>HOME, Wi-Fi and SETUP available; other modules are placeholders. / Pozostałe moduły w przygotowaniu.</p><p><a href="https://github.com/sp7uto/pocket-terminal-LILYGO-T-Display-S3/actions">GitHub Actions / build artifacts</a> · <a href="https://github.com/sp7uto/pocket-terminal-LILYGO-T-Display-S3">GitHub</a></p></section>
+<script type="module">
+const status=document.getElementById('status');
+try{
+const manifest=await fetch('manifest.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('Manifest '+r.status);return r.json()});
+if(manifest.version!=='0.1.0')throw Error('Unexpected manifest version');
+const part=manifest.builds[0].parts[0];
+if(part.path!=='pocket-terminal-v0.1.0.bin'||part.offset!==0)throw Error('Unexpected flash layout');
+const fw=await fetch(part.path,{cache:'no-store'});if(!fw.ok)throw Error('BIN '+fw.status);
+const bytes=await fw.arrayBuffer();
+const hashes=await fetch('SHA256SUMS.txt',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('SHA256 '+r.status);return r.text()});
+const expected=hashes.trim().split(/\s+/)[0].toLowerCase();
+const actual=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),x=>x.toString(16).padStart(2,'0')).join('');
+if(actual!==expected)throw Error('SHA-256 mismatch');
+await import('https://unpkg.com/esp-web-tools@10.1.1/dist/web/install-button.js?module');
+document.getElementById('install').hidden=false;status.textContent='Firmware available — SHA-256 OK';
+}catch(e){status.textContent='Installer unavailable / Instalator niedostępny: '+e.message;}
+</script></html>
