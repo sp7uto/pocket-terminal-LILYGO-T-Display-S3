@@ -6,7 +6,8 @@
 #include <lwip/sockets.h>
 #include <lwip/netdb.h>
 #include <fcntl.h>
-#include <esp_ping.h>
+#include <unistd.h>
+#include <errno.h>
 #include <ping/ping_sock.h>
 
 constexpr int NET_COUNT=10;
