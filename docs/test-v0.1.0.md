@@ -2,10 +2,6 @@
 
 Date: 2026-11-25
 
-- Installation through the project browser installer: PASS (reported by device owner).
-- Diagnostic v0.0.1 hardware tests: 8/8 PASS.
-- v0.1.0 menu, button gestures, Wi-Fi configuration, NTP, brightness, display timeout and settings persistence: pending individual verification.
-- RADIO, APRS, HA, METEO and MQTT remain placeholders in v0.1.0.
-- External sensors deferred.
+The earlier browser installation succeeded but installed diagnostic v0.0.1, not v0.1.0. The latter failed compilation (C++11 Button initialization). All v0.1.0 hardware tests remain pending until a successful build, deployment and version confirmation on the device.
 
-PL: Instalacja przez własny instalator WWW zakończona poprawnie. Poszczególne funkcje v0.1.0 wymagają jeszcze sprawdzenia na urządzeniu.
+PL: Poprzednia instalacja WWW wgrała wersję diagnostyczną. Testy v0.1.0 pozostają niepotwierdzone.
