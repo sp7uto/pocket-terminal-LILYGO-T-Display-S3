@@ -1,0 +1,16 @@
+{
+  "name": "Pocket Terminal Diagnostic",
+  "version": "0.0.1",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "pocket-terminal-diagnostic-v0.0.1.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}
