@@ -8,6 +8,7 @@
 #include <time.h>
 #include "meteo.h"
 #include "network.h"
+#include "aprs.h"
 
 TFT_eSPI lcd;
 TFT_eSprite ui(&lcd);
@@ -18,7 +19,7 @@ const char* names[]={"HOME","RADIO","APRS","SIEC","HA","METEO","MQTT","SETUP"};
 const uint16_t accents[]={TFT_CYAN,TFT_ORANGE,TFT_GREEN,TFT_SKYBLUE,TFT_CYAN,TFT_YELLOW,TFT_MAGENTA,TFT_LIGHTGREY};
 const uint16_t bg=0x0884, tile=0x1927;
 String ssid[2],pass[2],apKey;
-uint8_t selection=0,brightness=180,slot=0,weatherPage=0,netPage=0;
+uint8_t selection=0,brightness=180,slot=0,weatherPage=0,netPage=0,aprsPage=0;
 bool inApp=false,apActive=false,asleep=false,dirty=true,connected=false;
 bool restartPending=false, displayReady=false;
 uint32_t apStarted=0;
@@ -48,13 +49,14 @@ void netRow(const String& name,NetResult n,int y,bool enabled=true){
   line(name,y);
   bool old=!connected||!n.stamp||millis()-n.stamp>180000UL;
   String status=!enabled?"--":!n.stamp?"WAIT":old?"OLD":n.state==1?(n.code>0?"HTTP "+String(n.code):String(n.ms)+" ms"):"NO REPLY";
-  ui.setTextColor(!enabled||old?TFT_LIGHTGREY:n.state==1?TFT_GREEN:TFT_ORANGE,bg);
+  if(enabled&&!old&&n.sent)status=(n.received?String(n.ms)+" ms ":"")+String((n.sent-n.received)*100/n.sent)+"% loss";
+  ui.setTextColor(!enabled||old?TFT_LIGHTGREY:n.state==1&&(!n.sent||n.received==n.sent)?TFT_GREEN:TFT_ORANGE,bg);
   ui.drawRightString(status,310,y,2);
 }
 void render(){
   if(asleep)return;
   ui.fillSprite(bg);
-  ui.setTextColor(TFT_CYAN,bg);ui.drawString("POCKET TERMINAL  v0.3.0",6,2,2);
+  ui.setTextColor(TFT_CYAN,bg);ui.drawString("POCKET TERMINAL  v0.4.0",6,2,2);
   ui.setTextColor(connected?TFT_GREEN:TFT_LIGHTGREY,bg);
   ui.drawRightString(connected?"WiFi "+String(WiFi.RSSI())+"dBm":apActive?"SETUP AP":"OFFLINE",314,2,2);
   if(!inApp){
@@ -81,6 +83,30 @@ void render(){
       line(connected?"IP: "+WiFi.localIP().toString():"WiFi: offline",104);
       WeatherData w=weatherSnapshot();
       line(w.valid?"Meteo: "+val(w.temp,1)+" C"+((w.failed||!connected||millis()-w.updated>1800000UL)?" (old)":""):"Meteo: waiting",124);
+    }else if(selection==2){
+      AprsStation stations[24];aprsSnapshot(stations);
+      if(!aprsCall.length())line("Set APRS login in SETUP",48,TFT_ORANGE);
+      else{
+        line(aprsPage==0?"TRACKERS":"LOCAL RADAR "+String(aprsRadius,0)+" km",43,TFT_CYAN);
+        ui.setTextColor(aprsOnline?TFT_GREEN:TFT_ORANGE,bg);ui.drawRightString(aprsOnline?"LIVE":"OFFLINE",310,24,2);
+        if(aprsPage==0){
+          for(int i=0;i<3;i++){
+            int y=63+i*25;line(aprsWatch[i].length()?aprsWatch[i]:"--",y);
+            AprsStation &p=stations[i];String s=!p.seen?"WAIT":String(p.km,1)+" km "+String(p.bearing,0)+" deg";
+            if(p.seen&&millis()-p.seen>1800000UL)s+=" OLD";
+            ui.setTextColor(p.seen?TFT_CYAN:TFT_LIGHTGREY,bg);ui.drawRightString(s,310,y,2);
+          }
+        }else{
+          int shown=0,skip=(aprsPage-1)*4;
+          for(int i=3;i<24;i++){
+            AprsStation &p=stations[i];if(!p.seen||millis()-p.seen>1800000UL)continue;
+            if(skip){skip--;continue;}if(shown>=4)break;
+            int y=63+shown*19;line(p.call,y);
+            ui.setTextColor(TFT_CYAN,bg);ui.drawRightString(String(p.km,1)+" km "+String(p.bearing,0)+" deg",310,y,2);shown++;
+          }
+          if(!shown)line("No recent stations on page",75,TFT_LIGHTGREY);
+        }
+      }
     }else if(selection==3){
       if(netPage==0){
         line(connected?"WiFi: connected":"WiFi: offline",48);
@@ -131,7 +157,7 @@ void render(){
       line("No live data",105,TFT_ORANGE);
     }
     line("Hold B: MENU",151,TFT_LIGHTGREY);
-    if(selection==3||selection==5)ui.drawRightString("A: PAGE  B: RETRY",310,151,2);
+    if(selection==2||selection==3||selection==5)ui.drawRightString("A: PAGE  B: RETRY",310,151,2);
   }
   ui.pushSprite(0,0);
 }
@@ -143,6 +169,9 @@ void configPage(){
     html+="<label>Password<input type=password maxlength=63 name=p"+String(i)+"></label>";
   }
   html+="<label>Latitude<input name=lat value='"+String(weatherLat)+"'></label><label>Longitude<input name=lon value='"+String(weatherLon)+"'></label>";
+  html+="<h2>APRS (receive only)</h2><label>Login callsign<input maxlength=15 name=ac value='"+esc(aprsCall)+"'></label><label>Radar radius km<input type=number min=1 max=100 name=ar value='"+String(aprsRadius,0)+"'></label>";
+  for(int i=0;i<3;i++)html+="<label>Tracker "+String(i+1)+"<input maxlength=15 name=aw"+String(i)+" value='"+esc(aprsWatch[i])+"'></label>";
+  html+="<label>All station types<input type=checkbox name=aa value=1"+String(aprsAll?" checked":"")+"></label><p>Radar center follows weather coordinates. Blank login disables APRS. No transmission.</p>";
   html+="<h2>Network monitor</h2><p>Optional targets. Empty host disables a target. ICMP=0, TCP=1, HTTP HEAD=2. Host without scheme or path.</p>";
   for(int i=0;i<NET_COUNT;i++){
     String k=String(i);
@@ -165,6 +194,11 @@ void startAP(){
     String lat=server.arg("lat"),lon=server.arg("lon");
     char *end1,*end2; double la=strtod(lat.c_str(),&end1),lo=strtod(lon.c_str(),&end2);
     if(!lat.length()||!lon.length()||*end1||*end2||!isfinite(la)||!isfinite(lo)||fabs(la)>90||fabs(lo)>180){server.send(400,"text/plain","Invalid coordinates");return;}
+    String ac=server.arg("ac");ac.trim();ac.toUpperCase();
+    long ar=server.arg("ar").toInt();
+    if((ac.length()&&!aprsValidCall(ac))||ar<1||ar>100){server.send(400,"text/plain","Invalid APRS settings");return;}
+    String aw[3];
+    for(int i=0;i<3;i++){aw[i]=server.arg("aw"+String(i));aw[i].trim();aw[i].toUpperCase();if(aw[i].length()&&!aprsValidCall(aw[i])){server.send(400,"text/plain","Invalid tracker");return;}}
     for(int i=0;i<NET_COUNT;i++){
       String k=String(i),name=server.arg("nn"+k),host=server.arg("nh"+k);
       long port=server.arg("np"+k).toInt(),kind=server.arg("nk"+k).toInt();
@@ -189,6 +223,8 @@ void startAP(){
       prefs.putUShort(("np"+k).c_str(),server.arg("np"+k).toInt());
       prefs.putUChar(("nk"+k).c_str(),server.arg("nk"+k).toInt());
     }
+    prefs.putString("ac",ac);prefs.putUInt("ar",ar);prefs.putBool("aa",server.hasArg("aa"));
+    for(int i=0;i<3;i++)prefs.putString(("aw"+String(i)).c_str(),aw[i]);
     prefs.putString("lat",String(la,6));prefs.putString("lon",String(lo,6));
     brightness=constrain(server.arg("bl").toInt(),30,255);
     sleepSeconds=constrain(server.arg("sl").toInt(),0,3600);
@@ -222,6 +258,10 @@ void setup(){
   prefs.begin("pocket",false);
   prefs.getString("lat","51.590748").toCharArray(weatherLat,sizeof(weatherLat));
   prefs.getString("lon","18.736974").toCharArray(weatherLon,sizeof(weatherLon));
+  aprsCall=prefs.getString("ac","");
+  aprsRadius=prefs.getUInt("ar",15);aprsAll=prefs.getBool("aa",false);
+  aprsLat=atof(weatherLat);aprsLon=atof(weatherLon);
+  for(int i=0;i<3;i++)aprsWatch[i]=prefs.getString(("aw"+String(i)).c_str(),"");
   const char* defaults[]={"Router","Backup router","NAS 1","NAS 2","Workstation","PC","Home Assistant","VPS","MQTT","Service"};
   for(int i=0;i<NET_COUNT;i++){
     String k=String(i);
@@ -240,8 +280,9 @@ void setup(){
   if(!ssid[0].length()&&!ssid[1].length()){selection=7;inApp=true;startAP();}
   xTaskCreate(weatherWorker,"meteo",16384,nullptr,1,nullptr);
   xTaskCreate(networkWorker,"network",12288,nullptr,1,nullptr);
+  xTaskCreate(aprsWorker,"aprs",12288,nullptr,1,nullptr);
   lastInput=millis();dirty=true;
-  Serial.println("POCKET_TERMINAL_V0.3.0");
+  Serial.println("POCKET_TERMINAL_V0.4.0");
 }
 void loop(){
   if(!displayReady){delay(100);return;}
@@ -254,6 +295,7 @@ void loop(){
     if(asleep){asleep=false;ledcWrite(0,brightness);}
     else if(!inApp){if(ea)selection=(selection+(ea==2?7:1))%8;if(eb==1)inApp=true;}
     else if(eb==2){inApp=false;}
+    else if(selection==2){if(ea)aprsPage=(aprsPage+1)%7;if(eb==1)aprsRefresh=true;}
     else if(selection==3){if(ea)netPage=(netPage+1)%4;if(eb==1)netRefresh=true;}
     else if(selection==5){if(ea)weatherPage=(weatherPage+1)%3;if(eb==1)weatherRefresh=true;}
     else if(selection==7){if(ea==2)startAP();if(eb==1){brightness=brightness==180?80:brightness==80?255:180;ledcWrite(0,brightness);prefs.putUChar("bl",brightness);}}
