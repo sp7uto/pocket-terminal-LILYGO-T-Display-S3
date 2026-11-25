@@ -6,7 +6,7 @@
 #include <ArduinoJson.h>
 #include <time.h>
 #include <math.h>
-#include <esp_crt_bundle.h>
+#include "weather_ca.h"
 
 struct WeatherData {
   bool valid=false, failed=false;
@@ -38,8 +38,7 @@ static void weatherWorker(void*){
       weatherRefresh=false;last=now;
       WiFiClientSecure client;
       // Use the ESP-IDF certificate bundle, never disable TLS verification.
-      extern const uint8_t rootca_crt_bundle_start[] asm("_binary_x509_crt_bundle_start");
-      client.setCACertBundle(rootca_crt_bundle_start);
+      client.setCACert(WEATHER_CA);
       client.setTimeout(8000);
       HTTPClient http;
       String url=String("https://api.open-meteo.com/v1/forecast?latitude=")+weatherLat+"&longitude="+weatherLon+
