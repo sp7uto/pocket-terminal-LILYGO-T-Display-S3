@@ -3,9 +3,9 @@
 <style>body{background:#091522;color:#e5f4ff;font:16px system-ui;max-width:800px;margin:60px auto;padding:24px}h1{color:#67d9ff}section{padding:24px;border:1px solid #36536a;border-radius:12px}a{color:#67d9ff}button{background:#1678b5;color:white;border:0;border-radius:8px;padding:14px;font-weight:bold;cursor:pointer}</style>
 <h1>Pocket Terminal – LILYGO T-Display-S3</h1><section><h2>Web Installer / Instalator WWW</h2><p>v0.2.0 — experimental / wersja testowa. Standard non-touch T-Display-S3 only.</p><p>Keep your verified factory backup. Close serial monitors. / Zachowaj sprawdzoną kopię Flash, zamknij monitor portu.</p>
 <p id="status">Checking firmware availability / Sprawdzanie dostępności firmware…</p>
-<div id="install" hidden><esp-web-install-button manifest="manifest.json"><button slot="activate">UPDATE POCKET TERMINAL v0.2.0 (NO ERASE)</button><span slot="unsupported">Use Chrome or Edge on desktop.</span></esp-web-install-button><details><summary>First installation / Instalacja od podstaw (may erase settings)</summary><esp-web-install-button manifest="manifest-full.json"><button slot="activate">FULL INSTALL v0.2.0</button></esp-web-install-button></details></div>
+<div id="install" hidden><button id="update">UPDATE v0.2.0 — APP ONLY / NO ERASE</button><pre id="log" style="white-space:pre-wrap"></pre><p>For existing Pocket Terminal v0.1.0 only. / Tylko dla działającej wersji v0.1.0.</p></div>
 <p><a href="pocket-terminal-app-v0.2.0.bin">APP BIN</a> · <a href="pocket-terminal-v0.2.0.bin">FULL BIN</a> · <a href="SHA256SUMS.txt">SHA-256</a></p>
-<p>HOME · RADIO · APRS · NETWORK · HA · METEO · MQTT · SETUP</p><p>HOME, METEO, Wi-Fi and SETUP available; other modules are placeholders. / Aktualizacja z v0.1.0: NIE zaznaczaj Erase device. / Leave Erase device unchecked. Pozostałe moduły w przygotowaniu.</p><p><a href="https://github.com/sp7uto/pocket-terminal-LILYGO-T-Display-S3/actions">GitHub Actions / build artifacts</a> · <a href="https://github.com/sp7uto/pocket-terminal-LILYGO-T-Display-S3">GitHub</a></p></section>
+<p>HOME · RADIO · APRS · NETWORK · HA · METEO · MQTT · SETUP</p><p>HOME, METEO, Wi-Fi and SETUP available; other modules are placeholders. / Aktualizacja zapisuje wyłącznie aplikację. Pozostałe moduły w przygotowaniu.</p><p><a href="https://github.com/sp7uto/pocket-terminal-LILYGO-T-Display-S3/actions">GitHub Actions / build artifacts</a> · <a href="https://github.com/sp7uto/pocket-terminal-LILYGO-T-Display-S3">GitHub</a></p></section>
 <script type="module">
 const status=document.getElementById('status');
 try{
@@ -20,7 +20,33 @@ const hashes=await fetch('SHA256SUMS.txt',{cache:'no-store'}).then(r=>{if(!r.ok)
 const expected=hashes.split('\n').map(l=>l.trim().split(/\s+/)).find(p=>p[1]===part.path)?.[0]?.toLowerCase();
 const actual=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),x=>x.toString(16).padStart(2,'0')).join('');
 if(actual!==expected)throw Error('SHA-256 mismatch');
-await import('https://unpkg.com/esp-web-tools@10.1.1/dist/web/install-button.js?module');
+const {ESPLoader,Transport}=await import('https://unpkg.com/esptool-js@0.7.0/bundle.js');
+if(!navigator.serial)throw Error('Chrome / Edge Web Serial required');
+const button=document.getElementById('update'),log=document.getElementById('log');
+button.onclick=async()=>{
+ if(!confirm('Update existing Pocket Terminal v0.1.0? Only application at 0x10000 will be written. No full erase.'))return;
+ button.disabled=true;let transport;
+ try{
+ const port=await navigator.serial.requestPort({filters:[{usbVendorId:0x303a}]});
+ transport=new Transport(port,true);
+ const loader=new ESPLoader({transport,baudrate:115200,terminal:{clean:()=>log.textContent='',writeLine:s=>log.textContent+=s+'\n',write:s=>log.textContent+=s}});
+ const chip=await loader.main();
+ if(!String(chip).startsWith('ESP32-S3'))throw Error('Wrong chip: '+chip);
+ const table=await loader.readFlash(0x8000,0x1000);
+ const view=new DataView(table.buffer,table.byteOffset,table.byteLength);
+ let limit=0;
+ for(let i=0;i+32<=table.length;i+=32){
+ if(view.getUint16(i,true)!==0x50aa)break;
+ if(table[i+2]===0&&view.getUint32(i+4,true)===0x10000)limit=view.getUint32(i+8,true);
+ }
+ if(!limit||Math.ceil(bytes.byteLength/4096)*4096>limit)throw Error('Application partition mismatch');
+ if(new Uint8Array(bytes)[0]!==0xe9)throw Error('Invalid application image');
+ await loader.writeFlash({fileArray:[{data:new Uint8Array(bytes),address:0x10000}],flashMode:'keep',flashFreq:'keep',flashSize:'keep',eraseAll:false,compress:true,reportProgress:(_,w,t)=>status.textContent='Writing app: '+Math.round(100*w/t)+'%'});
+ status.textContent='Application written — NO FULL ERASE. Restart device.';
+ await loader.after('hard_reset');
+ }catch(e){status.textContent='Update stopped: '+e.message;}
+ finally{if(transport)try{await transport.disconnect()}catch(e){}button.disabled=false;}
+};
 const full=await fetch('pocket-terminal-v0.2.0.bin',{cache:'no-store'});if(!full.ok)throw Error('Full BIN '+full.status);
 const fullHash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await full.arrayBuffer())),x=>x.toString(16).padStart(2,'0')).join('');
 if(fullHash!==hashes.split('\n').map(l=>l.trim().split(/\s+/)).find(p=>p[1]==='pocket-terminal-v0.2.0.bin')?.[0]?.toLowerCase())throw Error('Full SHA-256 mismatch');
