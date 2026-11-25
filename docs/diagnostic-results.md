@@ -7,10 +7,10 @@ Firmware flashed successfully using Espressif Web Flasher. Factory flash backup 
 | Readable display text | PASS |
 | Landscape orientation | PASS |
 | Flash 16 MiB | PASS |
-| PSRAM 8 MiB at runtime | Unconfirmed |
+| PSRAM 8 MiB at runtime | PASS |
 | RGB and test colors | PASS |
 | Button A navigation | PASS |
-| Button B brightness adjustment | Unconfirmed |
+| Button B brightness adjustment | PASS |
 | Wi-Fi scan | PASS |
 
-Physical PSRAM was detected by esptool prior to flashing. Button B operation is indirectly supported by successful Wi-Fi scan, but brightness adjustment remains unverified. Do not change working display pin mapping without evidence. GitHub Pages installer returned HTTP 404 for firmware; manual browser flashing of the build artifact succeeded.
+All eight diagnostic tests passed on the development unit. Runtime PSRAM reports 8 MiB and physical backlight brightness changes correctly. Both buttons work. Hardware configuration accepted for v0.1.0. Do not change working display pin mapping without evidence. GitHub Pages installer returned HTTP 404 for firmware; manual browser flashing of the build artifact succeeded.
