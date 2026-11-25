@@ -1,0 +1,30 @@
+name: Diagnostic firmware
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'platformio.ini'
+      - '.github/workflows/diagnostic.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install platformio==6.1.18
+      - run: pio run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pocket-terminal-diagnostic-v0.0.1
+          path: |
+            .pio/build/lilygo-t-display-s3/firmware.bin
+            .pio/build/lilygo-t-display-s3/bootloader.bin
+            .pio/build/lilygo-t-display-s3/partitions.bin
+          include-hidden-files: true
+          if-no-files-found: error
