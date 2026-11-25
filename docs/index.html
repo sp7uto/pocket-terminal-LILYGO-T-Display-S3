@@ -3,13 +3,14 @@
 <style>body{background:#091522;color:#e5f4ff;font:16px system-ui;max-width:800px;margin:60px auto;padding:24px}h1{color:#67d9ff}section{padding:24px;border:1px solid #36536a;border-radius:12px}a{color:#67d9ff}button{background:#1678b5;color:white;border:0;border-radius:8px;padding:14px;font-weight:bold;cursor:pointer}</style>
 <h1>Pocket Terminal – LILYGO T-Display-S3</h1><section><h2>Web Installer / Instalator WWW</h2><p>v0.2.0 — experimental / wersja testowa. Standard non-touch T-Display-S3 only.</p><p>Keep your verified factory backup. Close serial monitors. / Zachowaj sprawdzoną kopię Flash, zamknij monitor portu.</p>
 <p id="status">Checking firmware availability / Sprawdzanie dostępności firmware…</p>
-<div id="install" hidden><esp-web-install-button manifest="manifest.json"><button slot="activate">UPDATE POCKET TERMINAL v0.2.0</button><span slot="unsupported">Use Chrome or Edge on desktop.</span></esp-web-install-button><details><summary>First installation / Instalacja od podstaw (may erase settings)</summary><esp-web-install-button manifest="manifest-full.json"><button slot="activate">FULL INSTALL v0.2.0</button></esp-web-install-button></details></div>
+<div id="install" hidden><esp-web-install-button manifest="manifest.json"><button slot="activate">UPDATE POCKET TERMINAL v0.2.0 (NO ERASE)</button><span slot="unsupported">Use Chrome or Edge on desktop.</span></esp-web-install-button><details><summary>First installation / Instalacja od podstaw (may erase settings)</summary><esp-web-install-button manifest="manifest-full.json"><button slot="activate">FULL INSTALL v0.2.0</button></esp-web-install-button></details></div>
 <p><a href="pocket-terminal-app-v0.2.0.bin">APP BIN</a> · <a href="pocket-terminal-v0.2.0.bin">FULL BIN</a> · <a href="SHA256SUMS.txt">SHA-256</a></p>
-<p>HOME · RADIO · APRS · NETWORK · HA · METEO · MQTT · SETUP</p><p>HOME, METEO, Wi-Fi and SETUP available; other modules are placeholders. / Aktualizacja z v0.1.0 bez kasowania ustawień. Pozostałe moduły w przygotowaniu.</p><p><a href="https://github.com/sp7uto/pocket-terminal-LILYGO-T-Display-S3/actions">GitHub Actions / build artifacts</a> · <a href="https://github.com/sp7uto/pocket-terminal-LILYGO-T-Display-S3">GitHub</a></p></section>
+<p>HOME · RADIO · APRS · NETWORK · HA · METEO · MQTT · SETUP</p><p>HOME, METEO, Wi-Fi and SETUP available; other modules are placeholders. / Aktualizacja z v0.1.0: NIE zaznaczaj Erase device. / Leave Erase device unchecked. Pozostałe moduły w przygotowaniu.</p><p><a href="https://github.com/sp7uto/pocket-terminal-LILYGO-T-Display-S3/actions">GitHub Actions / build artifacts</a> · <a href="https://github.com/sp7uto/pocket-terminal-LILYGO-T-Display-S3">GitHub</a></p></section>
 <script type="module">
 const status=document.getElementById('status');
 try{
 const manifest=await fetch('manifest.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('Manifest '+r.status);return r.json()});
+if(manifest.new_install_prompt_erase!==true)throw Error('Unsafe erase policy');
 if(manifest.version!=='0.2.0')throw Error('Unexpected manifest version');
 const part=manifest.builds[0].parts[0];
 if(part.path!=='pocket-terminal-app-v0.2.0.bin'||part.offset!==65536)throw Error('Unexpected flash layout');
