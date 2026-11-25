@@ -18,7 +18,8 @@ const uint16_t bg=0x0884, tile=0x1927;
 String ssid[2],pass[2],apKey;
 uint8_t selection=0,brightness=180,slot=0;
 bool inApp=false,apActive=false,asleep=false,dirty=true,connected=false;
-bool restartPending=false;
+bool restartPending=false, displayReady=false;
+uint32_t apStarted=0;
 uint32_t restartAt=0,lastInput=0,lastDraw=0,lastAttempt=0,attemptStarted=0;
 uint32_t sleepSeconds=60;
 bool trying=false;
@@ -64,7 +65,7 @@ void render(){
       time_t now=time(nullptr);
       if(now>1700000000 && localtime_r(&now,&t)){
         strftime(buf,sizeof(buf),"%H:%M:%S",&t);
-        ui.setTextColor(TFT_WHITE,bg);ui.drawString(buf,10,47,4);
+        ui.setTextColor(TFT_WHITE,bg);ui.drawString(buf,10,47,2);
         strftime(buf,sizeof(buf),"%d.%m.%Y",&t);line(buf,83);
       }else line("NTP: waiting for time",52);
       line(connected?"IP: "+WiFi.localIP().toString():"WiFi: offline",104);
@@ -103,7 +104,7 @@ void startAP(){
   WiFi.mode(WIFI_AP_STA);
   char key[13];snprintf(key,sizeof(key),"%08lX",(unsigned long)esp_random());apKey=key;
   if(!WiFi.softAP("Pocket-Terminal-Setup",apKey.c_str()))return;
-  apActive=true;dirty=true;
+  apActive=true;apStarted=millis();dirty=true;
   server.on("/",HTTP_GET,[]{if(!apActive||server.client().localIP()!=WiFi.softAPIP()){server.send(403);return;}configPage();});
   server.on("/save",HTTP_POST,[]{
     if(!apActive||server.client().localIP()!=WiFi.softAPIP()){server.send(403);return;}
@@ -151,14 +152,17 @@ void setup(){
   for(int i=0;i<2;i++){ssid[i]=prefs.getString(("s"+String(i)).c_str(),"");pass[i]=prefs.getString(("p"+String(i)).c_str(),"");}
   lcd.init();lcd.setRotation(1);ledcSetup(0,5000,8);ledcAttachPin(BL,0);ledcWrite(0,brightness);
   ui.setColorDepth(16);if(!ui.createSprite(320,170)){lcd.drawString("Display buffer allocation failed",0,0,2);return;}
-  ui.fillSprite(bg);ui.setTextColor(TFT_CYAN,bg);ui.drawCentreString("POCKET TERMINAL",160,50,4);ui.drawCentreString("LILYGO T-Display-S3",160,95,2);ui.pushSprite(0,0);delay(800);
+  displayReady=true;
+  ui.fillSprite(bg);ui.setTextColor(TFT_CYAN,bg);ui.drawCentreString("POCKET TERMINAL",160,50,2);ui.drawCentreString("LILYGO T-Display-S3",160,95,2);ui.pushSprite(0,0);delay(800);
   WiFi.persistent(false);WiFi.mode(WIFI_STA);WiFi.setAutoReconnect(false);
   if(!ssid[0].length()&&!ssid[1].length()){selection=7;inApp=true;startAP();}
   lastInput=millis();dirty=true;
   Serial.println("POCKET_TERMINAL_V0.1.0");
 }
 void loop(){
+  if(!displayReady){delay(100);return;}
   handleWiFi();if(apActive)server.handleClient();
+  if(apActive&&!restartPending&&millis()-apStarted>600000UL){server.stop();WiFi.softAPdisconnect(true);WiFi.mode(WIFI_STA);apActive=false;dirty=true;}
   if(restartPending&&millis()-restartAt>1000)ESP.restart();
   int ea=poll(a),eb=poll(b);
   if(ea||eb){
