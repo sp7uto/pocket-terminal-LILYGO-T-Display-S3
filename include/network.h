@@ -13,7 +13,7 @@
 constexpr int NET_COUNT=10;
 struct NetTarget {char name[24];char host[96];uint16_t port;uint8_t kind;};
 static NetTarget targets[NET_COUNT]={};
-struct NetResult {int state=0;uint32_t ms=0,stamp=0;int code=0;};
+struct NetResult {int state=0;uint32_t ms=0,stamp=0;int code=0;uint8_t sent=0,received=0;};
 static NetResult results[NET_COUNT], internet4,internet6,dnsResult;
 static portMUX_TYPE netMux=portMUX_INITIALIZER_UNLOCKED;
 static std::atomic<bool> netRefresh(true);
@@ -52,26 +52,26 @@ static NetResult tcpProbe(const char* host,uint16_t port,int family=AF_UNSPEC){
   }
   n.ms=millis()-start;n.stamp=millis();return n;
 }
-struct PingContext {SemaphoreHandle_t done;bool ok;uint32_t ms;};
+struct PingContext {SemaphoreHandle_t done;uint32_t count;uint32_t ms;};
 static void pingSuccess(esp_ping_handle_t h,void* arg){
   auto* p=static_cast<PingContext*>(arg);uint32_t ms=0;
-  esp_ping_get_profile(h,ESP_PING_PROF_TIMEGAP,&ms,sizeof(ms));p->ms=ms;p->ok=true;
+  esp_ping_get_profile(h,ESP_PING_PROF_TIMEGAP,&ms,sizeof(ms));p->ms+=ms;p->count++;
 }
 static void pingEnd(esp_ping_handle_t,void* arg){xSemaphoreGive(static_cast<PingContext*>(arg)->done);}
 static NetResult pingProbe(const char* host){
   NetResult n;n.state=2;
   IPAddress ip;if(!WiFi.hostByName(host,ip)){n.stamp=millis();return n;}
   esp_ping_config_t cfg=ESP_PING_DEFAULT_CONFIG();
-  IP_ADDR4(&cfg.target_addr,ip[0],ip[1],ip[2],ip[3]);cfg.count=1;cfg.timeout_ms=1200;cfg.interval_ms=1200;
-  PingContext p={xSemaphoreCreateBinary(),false,0};
+  IP_ADDR4(&cfg.target_addr,ip[0],ip[1],ip[2],ip[3]);cfg.count=3;cfg.timeout_ms=1200;cfg.interval_ms=1200;
+  PingContext p={xSemaphoreCreateBinary(),0,0};
   if(!p.done){n.stamp=millis();return n;}
   esp_ping_callbacks_t cb={};cb.on_ping_success=pingSuccess;cb.on_ping_end=pingEnd;cb.cb_args=&p;
   esp_ping_handle_t handle=nullptr;
   if(esp_ping_new_session(&cfg,&cb,&handle)==ESP_OK){
-    if(esp_ping_start(handle)==ESP_OK)xSemaphoreTake(p.done,portMAX_DELAY);
+    if(esp_ping_start(handle)==ESP_OK){n.sent=3;xSemaphoreTake(p.done,portMAX_DELAY);}
     esp_ping_delete_session(handle);
   }
-  vSemaphoreDelete(p.done);n.state=p.ok?1:2;n.ms=p.ms;n.stamp=millis();return n;
+  vSemaphoreDelete(p.done);n.received=p.count;n.state=p.count?1:2;n.ms=p.count?p.ms/p.count:0;n.stamp=millis();return n;
 }
 static NetResult httpProbe(const char* host,uint16_t port){
   NetResult n;n.state=2;uint32_t start=millis();
