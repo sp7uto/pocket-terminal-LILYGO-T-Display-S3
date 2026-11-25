@@ -199,7 +199,7 @@ void startAP(){
 }
 void handleWiFi(){
   bool now=WiFi.status()==WL_CONNECTED;
-  if(now!=connected){connected=now;dirty=true;if(now){trying=false;configTzTime("CET-1CEST,M3.5.0,M10.5.0/3","pool.ntp.org","time.nist.gov");}}
+  if(now!=connected){connected=now;dirty=true;if(now){trying=false;WiFi.enableIpV6();netRefresh=true;configTzTime("CET-1CEST,M3.5.0,M10.5.0/3","pool.ntp.org","time.nist.gov");}}
   if(now)return;
   uint32_t ms=millis();
   if(trying && ms-attemptStarted>15000){WiFi.disconnect();trying=false;slot=(slot+1)%2;lastAttempt=ms;}
@@ -239,7 +239,6 @@ void setup(){
   WiFi.persistent(false);WiFi.mode(WIFI_STA);WiFi.setAutoReconnect(false);
   if(!ssid[0].length()&&!ssid[1].length()){selection=7;inApp=true;startAP();}
   xTaskCreate(weatherWorker,"meteo",16384,nullptr,1,nullptr);
-  WiFi.enableIpV6();
   xTaskCreate(networkWorker,"network",12288,nullptr,1,nullptr);
   lastInput=millis();dirty=true;
   Serial.println("POCKET_TERMINAL_V0.3.0");
