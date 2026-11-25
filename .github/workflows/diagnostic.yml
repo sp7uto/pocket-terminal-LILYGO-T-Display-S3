@@ -1,4 +1,4 @@
-name: Diagnostic firmware
+name: Pocket Terminal firmware
 on:
   workflow_dispatch:
   push:
@@ -32,12 +32,12 @@ jobs:
           BOOTAPP="$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin"
           test -f "$BOOTAPP"
           mkdir -p dist
-          python -m esptool --chip esp32s3 merge_bin -o dist/pocket-terminal-diagnostic-v0.0.1.bin --flash_mode keep --flash_size keep --flash_freq keep 0x0 "$BUILD/bootloader.bin" 0x8000 "$BUILD/partitions.bin" 0xe000 "$BOOTAPP" 0x10000 "$BUILD/firmware.bin"
+          python -m esptool --chip esp32s3 merge_bin -o dist/pocket-terminal-v0.1.0.bin --flash_mode keep --flash_size keep --flash_freq keep 0x0 "$BUILD/bootloader.bin" 0x8000 "$BUILD/partitions.bin" 0xe000 "$BOOTAPP" 0x10000 "$BUILD/firmware.bin"
           cd dist
-          sha256sum pocket-terminal-diagnostic-v0.0.1.bin > SHA256SUMS.txt
+          sha256sum pocket-terminal-v0.1.0.bin > SHA256SUMS.txt
       - uses: actions/upload-artifact@v6
         with:
-          name: pocket-terminal-diagnostic-v0.0.1
+          name: pocket-terminal-v0.1.0
           path: dist/
           include-hidden-files: true
           if-no-files-found: error
@@ -45,6 +45,10 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           cp -a docs/. dist/
+          cd dist
+          sha256sum -c SHA256SUMS.txt
+          test -s manifest.json
+          test -s index.html
       - uses: actions/upload-pages-artifact@v5
         if: github.ref == 'refs/heads/main'
         with:
@@ -60,3 +64,15 @@ jobs:
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+      - name: Verify public firmware matches deployed build
+        env:
+          SITE: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -eu
+          for attempt in $(seq 1 12); do
+            if curl -fsSL --max-time 20 "${SITE%/}/manifest.json?run=$GITHUB_RUN_ID" -o manifest.json && curl -fsSL --max-time 20 "${SITE%/}/SHA256SUMS.txt?run=$GITHUB_RUN_ID" -o SHA256SUMS.txt && curl -fsSL --max-time 30 "${SITE%/}/pocket-terminal-v0.1.0.bin?run=$GITHUB_RUN_ID" -o pocket-terminal-v0.1.0.bin && python -c 'import json; assert json.load(open("manifest.json"))["version"] == "0.1.0"' && sha256sum -c SHA256SUMS.txt; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
