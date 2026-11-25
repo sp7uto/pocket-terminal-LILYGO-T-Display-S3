@@ -19,8 +19,8 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       - run: pip install platformio==6.1.18
@@ -35,7 +35,7 @@ jobs:
           python -m esptool --chip esp32s3 merge_bin -o dist/pocket-terminal-diagnostic-v0.0.1.bin --flash_mode keep --flash_size keep --flash_freq keep 0x0 "$BUILD/bootloader.bin" 0x8000 "$BUILD/partitions.bin" 0xe000 "$BOOTAPP" 0x10000 "$BUILD/firmware.bin"
           cd dist
           sha256sum pocket-terminal-diagnostic-v0.0.1.bin > SHA256SUMS.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: pocket-terminal-diagnostic-v0.0.1
           path: dist/
@@ -45,7 +45,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           cp -a docs/. dist/
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         if: github.ref == 'refs/heads/main'
         with:
           path: dist
@@ -59,4 +59,4 @@ jobs:
     steps:
       - name: Deploy GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
