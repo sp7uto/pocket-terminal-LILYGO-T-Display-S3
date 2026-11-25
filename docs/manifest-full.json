@@ -1,13 +1,13 @@
 {
   "name": "Pocket Terminal (full installation)",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32-S3",
       "parts": [
         {
-          "path": "pocket-terminal-v0.2.0.bin",
+          "path": "pocket-terminal-v0.3.0.bin",
           "offset": 0
         }
       ]
