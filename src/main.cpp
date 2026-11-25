@@ -23,7 +23,7 @@ uint32_t apStarted=0;
 uint32_t restartAt=0,lastInput=0,lastDraw=0,lastAttempt=0,attemptStarted=0;
 uint32_t sleepSeconds=60;
 bool trying=false;
-struct Button {int pin; bool raw=true,stable=true; uint32_t changed=0,pressed=0;};
+struct Button {int pin; bool raw=true,stable=true; uint32_t changed=0,pressed=0; explicit Button(int p):pin(p){} };
 Button a{A},b{B};
 
 void line(const String& s,int y,uint16_t color=TFT_WHITE){
