@@ -7,7 +7,9 @@ on:
       - 'include/**'
       - 'platformio.ini'
       - '.github/workflows/diagnostic.yml'
-      - 'docs/**'
+      - 'docs/index.html'
+      - 'docs/manifest*.json'
+      - 'scripts/**'
 permissions:
   contents: read
   pages: write
@@ -18,6 +20,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    outputs:
+      hashes: ${{ steps.hashes.outputs.value }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -32,12 +36,16 @@ jobs:
           BOOTAPP="$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin"
           test -f "$BOOTAPP"
           mkdir -p dist
-          python -m esptool --chip esp32s3 merge_bin -o dist/pocket-terminal-v0.1.0.bin --flash_mode keep --flash_size keep --flash_freq keep 0x0 "$BUILD/bootloader.bin" 0x8000 "$BUILD/partitions.bin" 0xe000 "$BOOTAPP" 0x10000 "$BUILD/firmware.bin"
+          python -m esptool --chip esp32s3 merge_bin -o dist/pocket-terminal-v0.2.0.bin --flash_mode keep --flash_size keep --flash_freq keep 0x0 "$BUILD/bootloader.bin" 0x8000 "$BUILD/partitions.bin" 0xe000 "$BOOTAPP" 0x10000 "$BUILD/firmware.bin"
+          cp "$BUILD/firmware.bin" dist/pocket-terminal-app-v0.2.0.bin
           cd dist
-          sha256sum pocket-terminal-v0.1.0.bin > SHA256SUMS.txt
+          sha256sum pocket-terminal-v0.2.0.bin pocket-terminal-app-v0.2.0.bin > SHA256SUMS.txt
+      - name: Record exact build checksums
+        id: hashes
+        run: echo "value=$(sha256sum dist/SHA256SUMS.txt | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v6
         with:
-          name: pocket-terminal-v0.1.0
+          name: pocket-terminal-v0.2.0
           path: dist/
           include-hidden-files: true
           if-no-files-found: error
@@ -67,10 +75,11 @@ jobs:
       - name: Verify public firmware matches deployed build
         env:
           SITE: ${{ steps.deployment.outputs.page_url }}
+          EXPECTED: ${{ needs.build.outputs.hashes }}
         run: |
           set -eu
           for attempt in $(seq 1 12); do
-            if curl -fsSL --max-time 20 "${SITE%/}/manifest.json?run=$GITHUB_RUN_ID" -o manifest.json && curl -fsSL --max-time 20 "${SITE%/}/SHA256SUMS.txt?run=$GITHUB_RUN_ID" -o SHA256SUMS.txt && curl -fsSL --max-time 30 "${SITE%/}/pocket-terminal-v0.1.0.bin?run=$GITHUB_RUN_ID" -o pocket-terminal-v0.1.0.bin && python -c 'import json; assert json.load(open("manifest.json"))["version"] == "0.1.0"' && sha256sum -c SHA256SUMS.txt; then
+            if curl -fsSL --max-time 20 "${SITE%/}/manifest.json?run=$GITHUB_RUN_ID" -o manifest.json && curl -fsSL --max-time 20 "${SITE%/}/SHA256SUMS.txt?run=$GITHUB_RUN_ID" -o SHA256SUMS.txt && curl -fsSL --max-time 30 "${SITE%/}/pocket-terminal-v0.2.0.bin?run=$GITHUB_RUN_ID" -o pocket-terminal-v0.2.0.bin && curl -fsSL --max-time 30 "${SITE%/}/pocket-terminal-app-v0.2.0.bin?run=$GITHUB_RUN_ID" -o pocket-terminal-app-v0.2.0.bin && python -c 'import json; m=json.load(open("manifest.json")); assert m["version"]=="0.2.0" and m["builds"][0]["parts"]==[{"path":"pocket-terminal-app-v0.2.0.bin","offset":65536}]' && echo "$EXPECTED  SHA256SUMS.txt" | sha256sum -c - && sha256sum -c SHA256SUMS.txt; then
               exit 0
             fi
             sleep 10
