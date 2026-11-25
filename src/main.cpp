@@ -7,6 +7,7 @@
 #include <esp_system.h>
 #include <time.h>
 #include "meteo.h"
+#include "network.h"
 
 TFT_eSPI lcd;
 TFT_eSprite ui(&lcd);
@@ -17,7 +18,7 @@ const char* names[]={"HOME","RADIO","APRS","SIEC","HA","METEO","MQTT","SETUP"};
 const uint16_t accents[]={TFT_CYAN,TFT_ORANGE,TFT_GREEN,TFT_SKYBLUE,TFT_CYAN,TFT_YELLOW,TFT_MAGENTA,TFT_LIGHTGREY};
 const uint16_t bg=0x0884, tile=0x1927;
 String ssid[2],pass[2],apKey;
-uint8_t selection=0,brightness=180,slot=0,weatherPage=0;
+uint8_t selection=0,brightness=180,slot=0,weatherPage=0,netPage=0;
 bool inApp=false,apActive=false,asleep=false,dirty=true,connected=false;
 bool restartPending=false, displayReady=false;
 uint32_t apStarted=0;
@@ -43,10 +44,17 @@ void iconFor(int i,int x,int y,uint16_t c){
   }
 }
 String val(float x,int decimals=0){return isfinite(x)?String(x,decimals):String("--");}
+void netRow(const String& name,NetResult n,int y,bool enabled=true){
+  line(name,y);
+  bool old=!connected||!n.stamp||millis()-n.stamp>180000UL;
+  String status=!enabled?"--":!n.stamp?"WAIT":old?"OLD":n.state==1?(n.code>0?"HTTP "+String(n.code):String(n.ms)+" ms"):"NO REPLY";
+  ui.setTextColor(!enabled||old?TFT_LIGHTGREY:n.state==1?TFT_GREEN:TFT_ORANGE,bg);
+  ui.drawRightString(status,310,y,2);
+}
 void render(){
   if(asleep)return;
   ui.fillSprite(bg);
-  ui.setTextColor(TFT_CYAN,bg);ui.drawString("POCKET TERMINAL  v0.2.0",6,2,2);
+  ui.setTextColor(TFT_CYAN,bg);ui.drawString("POCKET TERMINAL  v0.3.0",6,2,2);
   ui.setTextColor(connected?TFT_GREEN:TFT_LIGHTGREY,bg);
   ui.drawRightString(connected?"WiFi "+String(WiFi.RSSI())+"dBm":apActive?"SETUP AP":"OFFLINE",314,2,2);
   if(!inApp){
@@ -74,10 +82,20 @@ void render(){
       WeatherData w=weatherSnapshot();
       line(w.valid?"Meteo: "+val(w.temp,1)+" C"+((w.failed||!connected||millis()-w.updated>1800000UL)?" (old)":""):"Meteo: waiting",124);
     }else if(selection==3){
-      line(connected?"WiFi: connected":"WiFi: offline",50);
-      line(connected?"IP: "+WiFi.localIP().toString():"IP: unavailable",72);
-      line(connected?"RSSI: "+String(WiFi.RSSI())+" dBm":"RSSI: unavailable",94);
-      line("Uptime: "+String(millis()/1000)+" s",116);
+      if(netPage==0){
+        line(connected?"WiFi: connected":"WiFi: offline",48);
+        line(connected?"IP: "+WiFi.localIP().toString():"IP: unavailable",68);
+        line(connected?"RSSI: "+String(WiFi.RSSI())+" dBm":"RSSI: unavailable",88);
+        line("Uptime: "+String(millis()/1000)+" s",108);
+      }else if(netPage==1){
+        netRow("IPv4 TCP",netSnapshot(10),48);
+        netRow("IPv6 TCP",netSnapshot(11),70);
+        netRow("DNS lookup",netSnapshot(12),92);
+        line("TCP / DNS timing, not WAN RTT",122,TFT_LIGHTGREY);
+      }else{
+        int start=(netPage-2)*5;
+        for(int j=0;j<5;j++){int i=start+j;netRow(targets[i].name,netSnapshot(i),44+j*20,targets[i].host[0]);}
+      }
     }else if(selection==5){
       WeatherData w=weatherSnapshot();
       line("Location: "+String(weatherLat)+", "+weatherLon,42,TFT_LIGHTGREY);
@@ -113,7 +131,7 @@ void render(){
       line("No live data",105,TFT_ORANGE);
     }
     line("Hold B: MENU",151,TFT_LIGHTGREY);
-    if(selection==5)ui.drawRightString("A: PAGE  B: RETRY",310,151,2);
+    if(selection==3||selection==5)ui.drawRightString("A: PAGE  B: RETRY",310,151,2);
   }
   ui.pushSprite(0,0);
 }
@@ -125,6 +143,13 @@ void configPage(){
     html+="<label>Password<input type=password maxlength=63 name=p"+String(i)+"></label>";
   }
   html+="<label>Latitude<input name=lat value='"+String(weatherLat)+"'></label><label>Longitude<input name=lon value='"+String(weatherLon)+"'></label>";
+  html+="<h2>Network monitor</h2><p>Optional targets. Empty host disables a target. ICMP=0, TCP=1, HTTP HEAD=2. Host without scheme or path.</p>";
+  for(int i=0;i<NET_COUNT;i++){
+    String k=String(i);
+    html+="<fieldset><legend>Target "+String(i+1)+"</legend><label>Name<input maxlength=23 name=nn"+k+" value='"+esc(targets[i].name)+"'></label><label>Host<input maxlength=95 name=nh"+k+" value='"+esc(targets[i].host)+"'></label><label>Port<input type=number min=1 max=65535 name=np"+k+" value='"+String(targets[i].port)+"'></label><label>Method<select name=nk"+k+">";
+    for(int j=0;j<3;j++)html+="<option value='"+String(j)+"'"+(targets[i].kind==j?" selected":"")+">"+(j==0?"ICMP":j==1?"TCP":"HTTP HEAD")+"</option>";
+    html+="</select></label></fieldset>";
+  }
   html+="<label>Brightness (30-255)<input type=number min=30 max=255 name=bl value='"+String(brightness)+"'></label><label>Screen timeout seconds (0=never)<input type=number min=0 max=3600 name=sl value='"+String(sleepSeconds)+"'></label><button>Save and restart</button></form>";
   server.sendHeader("Cache-Control","no-store");server.send(200,"text/html",html);
 }
@@ -140,6 +165,13 @@ void startAP(){
     String lat=server.arg("lat"),lon=server.arg("lon");
     char *end1,*end2; double la=strtod(lat.c_str(),&end1),lo=strtod(lon.c_str(),&end2);
     if(!lat.length()||!lon.length()||*end1||*end2||!isfinite(la)||!isfinite(lo)||fabs(la)>90||fabs(lo)>180){server.send(400,"text/plain","Invalid coordinates");return;}
+    for(int i=0;i<NET_COUNT;i++){
+      String k=String(i),name=server.arg("nn"+k),host=server.arg("nh"+k);
+      long port=server.arg("np"+k).toInt(),kind=server.arg("nk"+k).toInt();
+      bool valid=name.length()<=23&&host.length()<=95&&port>=1&&port<=65535&&kind>=0&&kind<=2;
+      for(unsigned j=0;j<host.length();j++)if(!isalnum((unsigned char)host[j])&&host[j]!='.'&&host[j]!='-'&&host[j]!=':')valid=false;
+      if(!valid){server.send(400,"text/plain","Invalid network target");return;}
+    }
     for(int i=0;i<2;i++){
       String ns=server.arg("s"+String(i)),np=server.arg("p"+String(i));
       if(ns.length()>32||np.length()>63||(np.length()>0&&np.length()<8)){server.send(400,"text/plain","Invalid WiFi credentials");return;}
@@ -149,6 +181,13 @@ void startAP(){
       if(ns!=ssid[i]||np.length())pass[i]=np;
       ssid[i]=ns;if(!ns.length())pass[i]="";
       prefs.putString(("s"+String(i)).c_str(),ssid[i]);prefs.putString(("p"+String(i)).c_str(),pass[i]);
+    }
+    for(int i=0;i<NET_COUNT;i++){
+      String k=String(i);
+      prefs.putString(("nn"+k).c_str(),server.arg("nn"+k));
+      prefs.putString(("nh"+k).c_str(),server.arg("nh"+k));
+      prefs.putUShort(("np"+k).c_str(),server.arg("np"+k).toInt());
+      prefs.putUChar(("nk"+k).c_str(),server.arg("nk"+k).toInt());
     }
     prefs.putString("lat",String(la,6));prefs.putString("lon",String(lo,6));
     brightness=constrain(server.arg("bl").toInt(),30,255);
@@ -183,6 +222,14 @@ void setup(){
   prefs.begin("pocket",false);
   prefs.getString("lat","51.590748").toCharArray(weatherLat,sizeof(weatherLat));
   prefs.getString("lon","18.736974").toCharArray(weatherLon,sizeof(weatherLon));
+  const char* defaults[]={"Router","Backup router","NAS 1","NAS 2","Workstation","PC","Home Assistant","VPS","MQTT","Service"};
+  for(int i=0;i<NET_COUNT;i++){
+    String k=String(i);
+    prefs.getString(("nn"+k).c_str(),defaults[i]).toCharArray(targets[i].name,sizeof(targets[i].name));
+    prefs.getString(("nh"+k).c_str(),"").toCharArray(targets[i].host,sizeof(targets[i].host));
+    targets[i].port=prefs.getUShort(("np"+k).c_str(),80);
+    targets[i].kind=prefs.getUChar(("nk"+k).c_str(),0);
+  }
   brightness=prefs.getUChar("bl",180);sleepSeconds=prefs.getUInt("sl",60);
   for(int i=0;i<2;i++){ssid[i]=prefs.getString(("s"+String(i)).c_str(),"");pass[i]=prefs.getString(("p"+String(i)).c_str(),"");}
   lcd.init();lcd.setRotation(1);ledcSetup(0,5000,8);ledcAttachPin(BL,0);ledcWrite(0,brightness);
@@ -192,8 +239,10 @@ void setup(){
   WiFi.persistent(false);WiFi.mode(WIFI_STA);WiFi.setAutoReconnect(false);
   if(!ssid[0].length()&&!ssid[1].length()){selection=7;inApp=true;startAP();}
   xTaskCreate(weatherWorker,"meteo",16384,nullptr,1,nullptr);
+  WiFi.enableIpV6();
+  xTaskCreate(networkWorker,"network",12288,nullptr,1,nullptr);
   lastInput=millis();dirty=true;
-  Serial.println("POCKET_TERMINAL_V0.2.0");
+  Serial.println("POCKET_TERMINAL_V0.3.0");
 }
 void loop(){
   if(!displayReady){delay(100);return;}
@@ -206,6 +255,7 @@ void loop(){
     if(asleep){asleep=false;ledcWrite(0,brightness);}
     else if(!inApp){if(ea)selection=(selection+(ea==2?7:1))%8;if(eb==1)inApp=true;}
     else if(eb==2){inApp=false;}
+    else if(selection==3){if(ea)netPage=(netPage+1)%4;if(eb==1)netRefresh=true;}
     else if(selection==5){if(ea)weatherPage=(weatherPage+1)%3;if(eb==1)weatherRefresh=true;}
     else if(selection==7){if(ea==2)startAP();if(eb==1){brightness=brightness==180?80:brightness==80?255:180;ledcWrite(0,brightness);prefs.putUChar("bl",brightness);}}
     dirty=true;
